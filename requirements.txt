@@ -1,0 +1,6 @@
+colorama==0.4.6
+emoji==2.12.1
+mmh3==4.1.0
+tqdm==4.66.4
+typing_extensions==4.12.2
+zstandard==0.23.0
