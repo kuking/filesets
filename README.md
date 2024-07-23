@@ -1,10 +1,3 @@
-Hello Claude IA, implement the following functionality using Python 3, use colours for output and emojis. Use tqdm
-library for reporting progress. For storing the status, save it as compressed json, being careful about storing hashes
-as strings and mtimes as floats rendered into strings. Only one tqdm per command should be used. Files can have spaces
-so be careful with regexes.
-
-Try to make readable code and reuse functions. No need to add spurious comments.
-
 # filesets
 
 Tool to keep track of big datasets of files, particularly useful when datasets are replicated and might be partially
@@ -19,8 +12,8 @@ algo=murmur128
 "mnt/raid2/second folder" => /second/
 ```
 
-At the moment algo is fixed but it might change in the future, real path to virtual paths associations are distinguished
-with the `=>` symbol.
+At the moment algo is fixed to murmur128, but it might change in the future, real path to virtual paths associations are
+distinguished with the `=>` symbol.
 
 ## Typical usage
 
