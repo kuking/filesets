@@ -61,9 +61,9 @@ def sync(config_path: Path, full: bool = False):
                         pbar.update(1)
                         continue
 
-                file_hash = data[virt_path]["hash"]
+                file_hash = data[virt_path]["hash"] if virt_path in data else None
                 # no need to re-hash on perms change
-                if data[virt_path]["mtime"] != f"{mtime:.6f}" or data[virt_path]["size"] != size:
+                if file_hash is None or data[virt_path]["mtime"] != f"{mtime:.6f}" or data[virt_path]["size"] != size:
                     file_hash = hash_file(filepath, algo)
                     files_hashed += 1
 
