@@ -1,5 +1,7 @@
 import json
 import lzma
+import os
+import stat
 from pathlib import Path
 from typing import Tuple, Dict
 
@@ -34,3 +36,24 @@ def load_fileset_data(filename: Path) -> Dict:
             return json.loads(f.read())
     except FileNotFoundError:
         return {}
+
+
+def get_file_permissions(filepath):
+    mode = os.stat(filepath).st_mode
+
+    perms = ''
+    for who in 'USR', 'GRP', 'OTH':
+        for what in 'R', 'W', 'X':
+            if mode & getattr(stat, f'S_I{what}{who}'):
+                perms += what.lower()
+            else:
+                perms += '-'
+
+    if stat.S_ISDIR(mode):
+        perms = 'd' + perms
+    elif stat.S_ISLNK(mode):
+        perms = 'l' + perms
+    else:
+        perms = '-' + perms
+
+    return perms

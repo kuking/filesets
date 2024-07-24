@@ -1,7 +1,5 @@
-import argparse
 import os
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -9,7 +7,7 @@ import mmh3
 from colorama import Fore, Style, init
 from tqdm import tqdm
 
-from misc import load_config, load_fileset_data, save_fileset_data
+from misc import load_config, load_fileset_data, save_fileset_data, get_file_permissions
 
 init(autoreset=True)
 
@@ -27,7 +25,7 @@ def sync(config_path: Path, full: bool = False):
     data_path = config_path.with_suffix(".fsd")
     data = load_fileset_data(data_path)
 
-    files_found, files_added, files_deleted, files_existed, files_changed = 0, 0, 0, 0, 0
+    files_found, files_added, files_deleted, files_existed, files_changed, files_hashed = 0, 0, 0, 0, 0, 0
 
     print(f"{Fore.RESET}Scanning all files 🔎 ... {Fore.RESET}")
     all_files = []
@@ -41,36 +39,44 @@ def sync(config_path: Path, full: bool = False):
 
     aborted = False
     try:
-        print(f"{Fore.RESET}fileset {config_path} syncing 🔄 ... ")
-        print(f"{Fore.LIGHTWHITE_EX}sorting by last known ... {Fore.RESET}")
+        print(f"{Fore.RESET}Fileset {config_path} syncing 🔄 ... ")
+        print(f"{Fore.LIGHTWHITE_EX}Sorting by last known ... {Fore.RESET}")
         all_files = sorted(all_files, key=lambda k: data[k[1]]['checked'] if k[1] in data else '1900-01-01T00:00:00')
-        with tqdm(total=len(all_files), unit="files", desc="Scanning") as pbar:
+        with (tqdm(total=len(all_files), unit="files", desc="Scanning") as pbar):
             for filepath, virt_path in all_files:
                 files_found += 1
                 mtime = os.path.getmtime(filepath)
                 size = os.path.getsize(filepath)
+                perms = get_file_permissions(filepath)
                 current_time = datetime.now().isoformat()
 
                 if virt_path in data:
-                    if not full and data[virt_path]["mtime"] == f"{mtime:.6f}" and data[virt_path]["size"] == size:
+                    if not full \
+                            and data[virt_path]["mtime"] == f"{mtime:.6f}" \
+                            and data[virt_path]["size"] == size \
+                            and data[virt_path]["perm"] == perms:
                         files_existed += 1
                         data[virt_path]["checked"] = current_time
                         data[virt_path]["exist"] = True
                         pbar.update(1)
                         continue
 
-                file_hash = hash_file(filepath, algo)
+                file_hash = data[virt_path]["hash"]
+                # no need to re-hash on perms change
+                if data[virt_path]["mtime"] != f"{mtime:.6f}" or data[virt_path]["size"] != size:
+                    file_hash = hash_file(filepath, algo)
+                    files_hashed += 1
 
                 if virt_path in data:
-                    if data[virt_path]["hash"] != file_hash:
+                    files_existed += 1
+                    if data[virt_path]["hash"] != file_hash or data[virt_path]["perm"] != perms:
                         files_changed += 1
-                    else:
-                        files_existed += 1
                 else:
                     files_added += 1
 
                 data[virt_path] = {
                     "hash": file_hash,
+                    "perm": perms,
                     "mtime": f"{mtime:.6f}",
                     "checked": current_time,
                     "hashed": current_time,
@@ -99,15 +105,23 @@ def sync(config_path: Path, full: bool = False):
 
     save_fileset_data(data_path, data)
 
-    show_status(files_added, files_changed, files_deleted, files_existed, files_found)
+    show_status(files_added, files_changed, files_deleted, files_existed, files_found, files_hashed)
 
 
-def show_status(files_added: int, files_changed: int, files_deleted: int, files_existed: int, files_found: int):
-    print(f"{Fore.RESET}{Style.BRIGHT}{files_found} Files found")
-    print(f"{Fore.RESET}{files_added} Files added")
-    print(f"{Fore.RED}{files_deleted} Files deleted")
-    print(f"{Fore.YELLOW}{files_changed} Files changed")
-    print(f"{Fore.CYAN}{files_existed} Files already known")
+def show_status(files_added: int,
+                files_changed: int,
+                files_deleted: int,
+                files_existed: int,
+                files_found: int,
+                files_hashed: int):
+    print(f"+-------------------------------+")
+    print(f"| {Fore.RESET}{Style.BRIGHT}{files_found:8} Files in Filesystem {Fore.RESET}{Style.RESET_ALL} |")
+    print(f"| {Fore.CYAN}{Style.BRIGHT}{files_existed:8} Already Tracked     {Fore.RESET}{Style.RESET_ALL} |")
+    print(f"| {Fore.BLUE}{files_hashed:8} Hashed              {Fore.RESET} |")
+    print(f"| {Fore.RESET}{files_added:8} Added               {Fore.RESET} |")
+    print(f"| {Fore.RED}{files_deleted:8} Deleted             {Fore.RESET} |")
+    print(f"| {Fore.YELLOW}{files_changed:8} Changed             {Fore.RESET} |")
+    print(f"+-------------------------------+")
 
 
 def status(config_path: Path):
