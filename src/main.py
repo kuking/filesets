@@ -22,16 +22,12 @@ def hash_file(filepath: Path, algo: str = "murmur128") -> str:
         return f"{mmh3.hash128(f.read()):032x}"
 
 
-def sync_files(config_path: Path, full: bool = False):
+def sync(config_path: Path, full: bool = False):
     algo, paths = load_config(config_path)
     data_path = config_path.with_suffix(".fsd")
     data = load_fileset_data(data_path)
 
-    files_found = 0
-    files_added = 0
-    files_deleted = 0
-    files_existed = 0
-    files_changed = 0
+    files_found, files_added, files_deleted, files_existed, files_changed = 0, 0, 0, 0, 0
 
     print(f"{Fore.RESET}Scanning all files 🔎 ... {Fore.RESET}")
     all_files = []
@@ -43,61 +39,75 @@ def sync_files(config_path: Path, full: bool = False):
                 virt_path = Path(virtual_path) / rel_path
                 all_files.append((filepath, str(virt_path)))
 
-    print(f"{Fore.RESET}fileset {config_path} syncing 🔄 ... ")
+    aborted = False
+    try:
+        print(f"{Fore.RESET}fileset {config_path} syncing 🔄 ... ")
+        print(f"{Fore.LIGHTWHITE_EX}sorting by last known ... {Fore.RESET}")
+        all_files = sorted(all_files, key=lambda k: data[k[1]]['checked'] if k[1] in data else '1900-01-01T00:00:00')
+        with tqdm(total=len(all_files), unit="files", desc="Scanning") as pbar:
+            for filepath, virt_path in all_files:
+                files_found += 1
+                mtime = os.path.getmtime(filepath)
+                size = os.path.getsize(filepath)
+                current_time = datetime.now().isoformat()
 
-    with tqdm(total=len(all_files), unit="files", desc="Scanning") as pbar:
-        for filepath, virt_path in all_files:
-            files_found += 1
-            mtime = os.path.getmtime(filepath)
-            size = os.path.getsize(filepath)
-            current_time = datetime.now().isoformat()
+                if virt_path in data:
+                    if not full and data[virt_path]["mtime"] == f"{mtime:.6f}" and data[virt_path]["size"] == size:
+                        files_existed += 1
+                        data[virt_path]["checked"] = current_time
+                        data[virt_path]["exist"] = True
+                        pbar.update(1)
+                        continue
 
-            if virt_path in data:
-                if not full and data[virt_path]["mtime"] == f"{mtime:.6f}" and data[virt_path]["size"] == size:
-                    files_existed += 1
-                    data[virt_path]["checked"] = current_time
-                    data[virt_path]["exist"] = True
-                    pbar.update(1)
-                    continue
+                file_hash = hash_file(filepath, algo)
 
-            file_hash = hash_file(filepath, algo)
-
-            if virt_path in data:
-                if data[virt_path]["hash"] != file_hash:
-                    files_changed += 1
+                if virt_path in data:
+                    if data[virt_path]["hash"] != file_hash:
+                        files_changed += 1
+                    else:
+                        files_existed += 1
                 else:
-                    files_existed += 1
+                    files_added += 1
+
+                data[virt_path] = {
+                    "hash": file_hash,
+                    "mtime": f"{mtime:.6f}",
+                    "checked": current_time,
+                    "hashed": current_time,
+                    "exist": True,
+                    "size": size
+                }
+
+                pbar.update(1)
+
+    except KeyboardInterrupt:
+        print("Interrupted, I will save the progress so you can continue later ...")
+        for vir_path in data.keys():
+            if 'exist' in data[vir_path]: del data[vir_path]['exist']
+        aborted = True
+
+    if not aborted:
+        deleted_files = []
+        for virt_path in data.keys():
+            if not 'exist' in data[virt_path]:
+                files_deleted += 1
+                deleted_files.append(virt_path)
             else:
-                files_added += 1
-
-            data[virt_path] = {
-                "hash": file_hash,
-                "mtime": f"{mtime:.6f}",
-                "checked": current_time,
-                "hashed": current_time,
-                "exist": True,
-                "size": size
-            }
-
-            pbar.update(1)
-
-    deleted_files = []
-    for virt_path in data.keys():
-        if not 'exist' in data[virt_path]:
-            files_deleted += 1
-            deleted_files.append(virt_path)
-        else:
-            del data[virt_path]["exist"]
-    for file in deleted_files:
-        del data[file]
+                del data[virt_path]["exist"]
+        for file in deleted_files:
+            del data[file]
 
     save_fileset_data(data_path, data)
 
-    print(f"{Fore.RESET}{Style.BRIGHT}{files_found} Files in total")
+    show_status(files_added, files_changed, files_deleted, files_existed, files_found)
+
+
+def show_status(files_added: int, files_changed: int, files_deleted: int, files_existed: int, files_found: int):
+    print(f"{Fore.RESET}{Style.BRIGHT}{files_found} Files found")
     print(f"{Fore.RESET}{files_added} Files added")
     print(f"{Fore.RED}{files_deleted} Files deleted")
     print(f"{Fore.YELLOW}{files_changed} Files changed")
-    print(f"{Fore.CYAN}{files_existed} Files previously seen")
+    print(f"{Fore.CYAN}{files_existed} Files already known")
 
 
 def status(config_path: Path):
@@ -226,7 +236,7 @@ def main():
         sys.exit(1)
 
     if action == 'sync':
-        sync_files(config, "full" == extra)
+        sync(config, "full" == extra)
     elif action == 'status':
         status(config)
     elif action == 'check':
